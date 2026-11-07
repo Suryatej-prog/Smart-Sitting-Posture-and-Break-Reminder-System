@@ -1,0 +1,25 @@
+{
+  "name": "smartchair-backend",
+  "version": "1.0.0",
+  "description": "Backend for the Smart Sitting Posture Monitoring and Break Reminder System",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "publish:fake": "node scripts/fake-publisher.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mongoose": "^8.9.5",
+    "mqtt": "^5.10.4",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "aedes": "^0.51.3",
+    "mongodb-memory-server": "^10.1.3",
+    "socket.io-client": "^4.8.1"
+  }
+}
