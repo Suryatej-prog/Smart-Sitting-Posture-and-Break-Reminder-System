@@ -18,8 +18,12 @@ function emptyState(deviceId) {
     postureWarnings: 0,
     breakReminders: 0,
     breakThresholdSeconds: null,
-    ledOn: false,
-    buzzerOn: false,
+    // Expected = calculated by the backend from the rules, not measured.
+    expectedLedOn: false,
+    expectedBuzzerOn: false,
+    // Reported = what the ESP32 itself sent (led_on / buzzer_on). null = device never reported it.
+    reportedLedOn: null,
+    reportedBuzzerOn: null,
     updatedAt: null
   };
 }

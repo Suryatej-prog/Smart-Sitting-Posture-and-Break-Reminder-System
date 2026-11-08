@@ -60,9 +60,15 @@ Sensor reading payload:
   "distance_cm": 35.5,
   "posture_status": "slouching",
   "sitting_duration_seconds": 120,
-  "break_required": false
+  "break_required": false,
+  "led_on": false,
+  "buzzer_on": false
 }
 ```
+
+`led_on` and `buzzer_on` are optional. Send them only if the ESP32 can read its
+real LED/buzzer state; the backend exposes them as `reportedLedOn` /
+`reportedBuzzerOn` in live status.
 
 `device_id` and `is_seated` are required; anything invalid is logged and
 dropped, never stored. `posture_status` is one of `sitting_straight`,
@@ -112,6 +118,16 @@ Connect to the server URL and listen for:
   demo, changeable via `PUT /api/settings`), exactly one break event is
   recorded per session. It is marked taken when the user stands up or the
   dashboard acknowledges it.
+- Readings are applied in timestamp order per device. A delayed reading that is
+  older than the newest accepted one (e.g. a late "seated" message after the user
+  stood up) is ignored: it is not stored, opens no session and does not change
+  live status. Equal timestamps are accepted.
+- Live status has `expectedLedOn` / `expectedBuzzerOn`: what the LED and buzzer
+  *should* be doing, calculated by the backend from posture and sitting time.
+  They are not measured from the hardware. If the ESP32 includes `led_on` /
+  `buzzer_on` booleans in its sensor message, they appear as `reportedLedOn` /
+  `reportedBuzzerOn` (null until the device reports them). Show only the
+  reported values as physical LED/buzzer status.
 - After a server restart, live state is rebuilt from MongoDB so the dashboard
   never shows a stale session as live.
 

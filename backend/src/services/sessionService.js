@@ -54,7 +54,10 @@ function validatePayload(payload) {
       distanceCm,
       postureStatus: normalizePosture(payload.posture_status, payload.is_seated),
       sittingDurationSeconds,
-      breakRequired: payload.break_required === true
+      breakRequired: payload.break_required === true,
+      // Optional real telemetry: only set when the ESP32 itself reports it.
+      reportedLedOn: typeof payload.led_on === 'boolean' ? payload.led_on : null,
+      reportedBuzzerOn: typeof payload.buzzer_on === 'boolean' ? payload.buzzer_on : null
     }
   };
 }
@@ -63,8 +66,29 @@ async function findOpenSession(deviceId) {
   return SittingSession.findOne({ deviceId, endTime: null });
 }
 
+// Newest reading time we have accepted for a device: in-memory live state first,
+// then the database (covers a restart with no open session).
+async function latestAcceptedTimestamp(deviceId) {
+  const state = liveStatus.get(deviceId);
+  if (state.lastMessageAt) return new Date(state.lastMessageAt);
+  const last = await SensorReading.findOne({ deviceId }).sort({ timestamp: -1 });
+  return last ? last.timestamp : null;
+}
+
+let outOfOrderIgnored = 0;
+
 async function processReadingInternal(reading) {
-  // 1. Always store every valid reading.
+  // 0. Reject delayed/out-of-order readings. MQTT can deliver an old message
+  // late; applying it would reopen a closed session or rewind live state.
+  // It is not stored and changes nothing. Equal timestamps are still accepted.
+  const latest = await latestAcceptedTimestamp(reading.deviceId);
+  if (latest && reading.timestamp < latest) {
+    outOfOrderIgnored += 1;
+    console.warn(`[readings] ignored out-of-order reading for ${reading.deviceId}: ${reading.timestamp.toISOString()} is older than ${latest.toISOString()}`);
+    return null;
+  }
+
+  // 1. Store every valid, in-order reading.
   const saved = await SensorReading.create(reading);
 
   const state = liveStatus.get(reading.deviceId);
@@ -147,8 +171,12 @@ async function processReadingInternal(reading) {
       postureWarnings: session.postureWarnings,
       breakReminders: session.breakReminders,
       breakThresholdSeconds: threshold,
-      ledOn: reading.postureStatus === POSTURE.SLOUCHING,
-      buzzerOn: sittingSeconds >= threshold
+      // Expected states, calculated by the backend from the rules. NOT measured
+      // from the hardware. Real device telemetry is reportedLedOn/reportedBuzzerOn.
+      expectedLedOn: reading.postureStatus === POSTURE.SLOUCHING,
+      expectedBuzzerOn: sittingSeconds >= threshold,
+      reportedLedOn: reading.reportedLedOn,
+      reportedBuzzerOn: reading.reportedBuzzerOn
     });
   } else {
     // 5. Standing up closes the open session, if any.
@@ -178,8 +206,10 @@ async function processReadingInternal(reading) {
       sessionId: null,
       sessionStartTime: null,
       breakThresholdSeconds: threshold,
-      ledOn: false,
-      buzzerOn: false
+      expectedLedOn: false,
+      expectedBuzzerOn: false,
+      reportedLedOn: reading.reportedLedOn,
+      reportedBuzzerOn: reading.reportedBuzzerOn
     });
   }
 
@@ -227,4 +257,8 @@ function processReading(reading) {
   return next;
 }
 
-module.exports = { validatePayload, processReading, rebuildLiveState, POSTURE };
+function stats() {
+  return { outOfOrderIgnored };
+}
+
+module.exports = { validatePayload, processReading, rebuildLiveState, stats, POSTURE };

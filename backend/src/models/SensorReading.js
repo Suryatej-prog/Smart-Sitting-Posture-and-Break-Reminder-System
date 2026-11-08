@@ -12,7 +12,10 @@ const sensorReadingSchema = new mongoose.Schema(
       default: 'unknown'
     },
     sittingDurationSeconds: { type: Number, default: 0 },
-    breakRequired: { type: Boolean, default: false }
+    breakRequired: { type: Boolean, default: false },
+    // Only set when the ESP32 reports its own LED/buzzer state (led_on / buzzer_on).
+    reportedLedOn: { type: Boolean, default: null },
+    reportedBuzzerOn: { type: Boolean, default: null }
   },
   { timestamps: true }
 );

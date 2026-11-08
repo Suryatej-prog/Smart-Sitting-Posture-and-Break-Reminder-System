@@ -150,6 +150,44 @@ async function main() {
   ok('realtime: break-reminder emitted', eventNames.includes('break-reminder'));
   ok('realtime: session-ended emitted', eventNames.includes('session-ended'));
 
+  // --- Out-of-order readings: sit -> stand -> delayed sit must not reopen a session ---
+  const waitFor = async (fn, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 100)); }
+    return false;
+  };
+  const getJson = async (path) => (await fetch(`${base}${path}`)).json();
+  const base2 = Date.now() - 60 * 1000;
+  const dev = 'chair_02';
+  const send = (offsetSec, extra) => publish(`smartchair/${dev}/sensors`, {
+    device_id: dev, timestamp: new Date(base2 + offsetSec * 1000).toISOString(), distance_cm: 35, sitting_duration_seconds: 0, ...extra
+  });
+  await send(0, { is_seated: true, posture_status: 'sitting_straight' });
+  await send(10, { is_seated: false, posture_status: 'not_seated' });
+  await waitFor(async () => (await getJson(`/api/sessions?device_id=${dev}`)).items.some((x) => x.endTime));
+  await send(5, { is_seated: true, posture_status: 'sitting_straight' }); // delayed "seated" from before the stand
+  await send(11, { is_seated: false, posture_status: 'not_seated' }); // newer in-order reading, used as a barrier
+  await waitFor(async () => (await getJson(`/api/live-status?device_id=${dev}`)).lastMessageAt === new Date(base2 + 11000).toISOString());
+  const s2 = await getJson(`/api/sessions?device_id=${dev}`);
+  ok('delayed old seated reading creates no phantom session', s2.total === 1 && Boolean(s2.items[0].endTime));
+  ok('session duration is not inflated by the delayed reading', s2.items[0].durationSeconds === 10);
+  const live2 = await getJson(`/api/live-status?device_id=${dev}`);
+  ok('live status stays not seated after the delayed reading', live2.isSeated === false && live2.sessionId === null);
+  const r2 = await getJson(`/api/sensor-readings?device_id=${dev}&limit=100`);
+  ok('out-of-order reading is not stored (3 in-order readings only)', r2.total === 3);
+  await send(30, { is_seated: true, posture_status: 'sitting_straight' }); // a genuinely new sit still works
+  await waitFor(async () => (await getJson(`/api/sessions?device_id=${dev}`)).total === 2);
+  ok('a genuinely newer seated reading still starts a new session', (await getJson(`/api/sessions?device_id=${dev}`)).total === 2);
+
+  // --- LED / buzzer: expected (backend-calculated) vs reported (device telemetry) ---
+  const live3 = await getJson(`/api/live-status?device_id=${dev}`);
+  ok('live status exposes expected LED/buzzer, not a bare ledOn/buzzerOn', 'expectedLedOn' in live3 && 'expectedBuzzerOn' in live3 && !('ledOn' in live3) && !('buzzerOn' in live3));
+  ok('reported LED/buzzer stay null when the device does not report them', live3.reportedLedOn === null && live3.reportedBuzzerOn === null);
+  await send(35, { is_seated: true, posture_status: 'slouching', led_on: true, buzzer_on: false });
+  await waitFor(async () => (await getJson(`/api/live-status?device_id=${dev}`)).reportedLedOn === true);
+  const live4 = await getJson(`/api/live-status?device_id=${dev}`);
+  ok('device-reported LED/buzzer telemetry is passed through', live4.reportedLedOn === true && live4.reportedBuzzerOn === false && live4.expectedLedOn === true);
+
   const unknown = await fetch(`${base}/api/nope`);
   ok('unknown route returns clean 404', unknown.status === 404);
 
